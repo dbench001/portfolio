@@ -1,0 +1,119 @@
+'''
+
+  Linear Regression Analysis using Big Query (Google Cloud Platform)
+
+'''
+
+
+
+
+'''
+
+  This is a program that uses linear resgression to predict how many Wins (W) a team will have
+
+  based off of how many Wins (W) the team already has. For this example, the Lahman Baseball Database
+
+  was used. The training set of this data included data between 1950 and 1999. The testing set
+
+  included data from 2000 to present.
+
+'''
+
+
+
+
+#Create a linear regression model (teamWins will be name of the model).
+
+CREATE MODEL Lahman.teamWins
+
+OPTIONS(model_type="linear_reg") AS
+
+SELECT W AS label,HR
+
+FROM Lahman.Teams
+
+WHERE yearID >= 1950 AND yearID <= 1999
+
+
+
+
+#Find the weights (coefficients) for the linear regression model.
+
+SELECT *
+
+FROM ML.WEIGHTS(MODEL Lahman.teamWins)
+
+
+
+
+#Predict how many Wins a tean will have. Off by about 9 games(mean_absolute_error).
+
+SELECT *
+
+FROM ML.EVALUATE(MODEL Lahman.teamWins,(
+
+SELECT W AS label,HR
+
+FROM Lahman.Teams
+
+WHERE yearID > 1999
+
+))
+
+
+
+
+'''
+
+  This is a program that uses linear resgression to predict how many Wins (W) a team will have
+
+  based off of the number of singles , doubles (2b), triples (3b), homeruns (HR), and base on balls (BB) the team already has.
+
+  For this example, the Lahman Baseball Database was used.
+
+  The training set of this data included data between 1950 and 1999. The testing set
+
+  included data from 2000 to present.
+
+'''
+
+
+
+
+#Create a linear regression model (teamWins2 will be name of the model).
+
+CREATE MODEL Lahman.teamWins2
+
+OPTIONS(model_type="linear_reg") AS
+
+SELECT W AS label,_2B,_3B,HR,BB,H-_2B-_3B-HR AS Singles
+
+FROM Lahman.Teams
+
+WHERE yearID >= 1950 AND yearID <= 1999
+
+
+
+
+#Find the weights (coefficients) for the linear regression model.
+
+SELECT *
+
+FROM ML.WEIGHTS(MODEL Lahman.teamWins2)
+
+
+
+
+#Predict how many Wins (W) a team will have.
+
+SELECT *
+
+FROM ML.EVALUATE(MODEL Lahman.teamWins2,(
+
+SELECT W AS label,_2B,_3B,HR,BB,H-_2B-_3B-HR AS Singles
+
+FROM Lahman.Teams
+
+WHERE yearID > 1999
+
+))
