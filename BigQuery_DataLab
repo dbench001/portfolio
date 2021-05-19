@@ -1,0 +1,361 @@
+'''
+
+	Logistic Regression Analysis using Big Query (Google Cloud Platform) and DataLab
+
+'''
+
+
+
+
+
+
+
+#---------------------------------------------------------------
+
+#BigQuery
+
+
+
+
+#Write query to list playerID, careerAB, careerHR and filter on careerAB >= 4000.
+
+#Name table 't1'.
+
+SELECT playerID, sum(HR) AS careerHR, sum(AB) AS careerAB
+
+FROM Lahman.Batting AS Batting
+
+GROUP BY playerID
+
+HAVING careerAB >= 4000
+
+
+
+
+#Write query to list playerID, careerAB, careerHR, and inducted for players elected to the Hall Of Fame.
+
+#Name table 't2'.
+
+SELECT Hall.playerID, careerHR, careerAB, inducted
+
+FROM Lahman.Hall As Hall INNER JOIN Lahman.t1 AS t1
+
+ON Hall.playerID = t1.playerID
+
+WHERE inducted = true AND category = "Player"
+
+
+
+
+#Write query to list playerID, careerAB, careerHR, and inducted for players in the Batting table but NOT elected to the Hall Of Fame.
+
+#Limit because t2 only has 157.
+
+#Name table 't3'.
+
+SELECT t1.playerID, t1.careerHR, t1.careerAB, inducted
+
+FROM Lahman.t1 AS t1 LEFT JOIN Lahman.t2 AS t2
+
+ON t1.playerID = t2.playerID
+
+WHERE inducted IS NULL
+
+ORDER BY careerAB
+
+LIMIT 157
+
+
+
+
+#-------------
+
+
+
+
+#When joining both tables (for train/test), make sure tables are in random order (order by playerID).
+
+#Pick out 100 as training set
+
+#100 of guys in HOF
+
+#100 of guys NOT in HOF
+
+#Change null (inducted) to false
+
+
+
+
+#Stack two tables on top of each other, save this table as 'train' (training set).
+
+(SELECT playerID,careerHR,inducted
+
+FROM Lahman.t2 AS t2
+
+ORDER BY playerID
+
+LIMIT 100
+
+)
+
+
+
+
+UNION ALL
+
+
+
+
+#Replace the null values in t3 with false.
+
+(SELECT playerID,careerHR,IFNULL(inducted, false)
+
+FROM Lahman.t3 AS t3
+
+ORDER BY playerID
+
+LIMIT 100
+
+)
+
+
+
+
+#Stack two additional tables, save this table as 'test' (test set).
+
+(SELECT playerID,careerHR,inducted
+
+FROM Lahman.t2 AS t2
+
+ORDER BY playerID
+
+LIMIT 57
+
+)
+
+
+
+
+UNION ALL
+
+
+
+
+#Replace the null values in t3 with false.
+
+(SELECT playerID,careerHR,IFNULL(inducted, false)
+
+FROM Lahman.t3 AS t3
+
+ORDER BY playerID
+
+LIMIT 57
+
+)
+
+
+
+
+#-------------
+
+
+
+
+#Create the logistic training model ('exam') with the training set and evaluate with the test set.
+
+#The idea is for the model to predict Hall Of Fame membership by career homerun total.
+
+
+
+
+CREATE MODEL Lahman.exam
+
+OPTIONS(model_type="logistic_reg") AS
+
+SELECT inducted AS label,careerHR
+
+FROM Lahman.train
+
+
+
+
+#Get the weights (coefficients) of the logistic model from 'exam'.
+
+SELECT *
+
+FROM ML.WEIGHTS(MODEL Lahman.exam)
+
+
+
+careerHR
+
+
+
+__INTERCEPT__
+
+
+
+
+
+
+
+#Evaluate the training model with the test set, evaluate logloss.
+
+SELECT *
+
+FROM ML.EVALUATE(MODEL Lahman.exam,(
+
+SELECT inducted AS label,careerHR
+
+FROM Lahman.test
+
+))
+
+
+
+
+#Get Results
+
+precision
+
+recall
+
+accuracy
+
+f1_score
+
+log_loss
+
+roc_auc
+
+
+
+
+#---------------------------------------------------------------
+
+#Datalab Notebook
+
+
+
+
+import google.datalab.bigquery as bq
+
+import numpy as np
+
+import pandas as pd
+
+import matplotlib.pyplot as plt
+
+from sklearn.linear_model import LogisticRegression
+
+
+
+
+#Sidenote: BigQuery does not use regularization.
+
+lm=LogisticRegression(C=10000000)
+
+
+
+
+#Create x & y.
+
+#Sidenote: be mindful about the order of concatenation - depending on which set is on top.
+
+train = bq.Query(sql='SELECT * FROM Lahman.train').execute().result().to_dataframe()
+
+x = train["careerHR"]
+
+y = np.concatenate((np.zeros(100),np.ones(100)))
+
+
+
+
+#lm.fit(x, y).
+
+#In order to fit, x value has to be a 2d-array, so reshape x.
+
+lm.fit(x.values.reshape(-1,1), y)
+
+LogisticRegression(C=1.0, class_weight=None, dual=False, fit_intercept=True,
+
+          intercept_scaling=1, max_iter=100, multi_class='ovr', n_jobs=1,
+
+          penalty='l2', random_state=None, solver='liblinear', tol=0.0001,
+
+          verbose=0, warm_start=False)
+
+
+
+
+print(lm.coef_)
+
+print(lm.intercept_)
+
+
+
+
+#Compare coef_ and intercept_ to BigQuery logloss.
+
+a = lm.coef_[0][0]
+
+b = lm.intercept_[0]
+
+
+
+
+#Get equation of logistics curve, with parameters of analysis from above (a, b).
+
+xaxis = np.linspace(0,800,1000)
+
+lcurve = 1/(1+np.exp(-(a*xaxis+b)))
+
+
+
+
+#Plot the estimated logistics curve along with the data.
+
+#The blue plots represent the players in the Hall Of Fame.
+
+#The red plots represent the other players.
+
+plt.plot(xaxis,lcurve,color="aqua",linestyle="dashed")
+
+xblue=train["careerHR"][:100]
+
+xred=train["careerHR"][100:]
+
+plt.scatter(xblue,np.zeros(100),color="blue")
+
+plt.scatter(xred,np.ones(100),color="red")
+
+
+
+
+#Calculate training loss, import 'test' query from BigQuery to Datalab (imported as Pandas dataframe).
+
+test = bq.Query(sql='SELECT * FROM Lahman.test').execute().result().to_dataframe()
+
+
+
+
+#Evaluate all the blue plots with the logistics curve.
+
+#Will take all xvalues in test set and plug them into curve to find their probablities.
+
+#57 zeros, 57 ones, because that is size of 'test' set.
+
+xtest = test["careerHR"]
+
+probs = 1/(1+np.exp(-(a*xtest+b)))
+
+ytest = np.concatenate((np.zeros(57),np.ones(57)))
+
+
+
+
+#Logloss will compare the probabilites of careerHRs and whether or not they (*have a probability of being) are in the HOF.
+
+from sklearn.metrics import log_loss
+
+log_loss(ytest,probs)
