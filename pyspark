@@ -1,0 +1,1014 @@
+'''
+
+    Examples working with big data and big data platforms/tools.
+
+    (GCP's Data Proc [pyspark], Ubidots, Data Studio, DataLab)
+
+'''
+
+
+
+
+#---------------------------------------------------------------
+
+1.)
+
+
+
+
+#In major league baseball, for almost every year since 1933, the best players in the National League
+
+#have played the best players in the American League in an All-Star game. (There were two All-Star games
+
+#in some of those years.) The PySpark script below produces a list of the players who started the All-Star game for the National League
+
+#in the position of catcher for each year. It includes each player's playerID, the year they played, and their teamID.
+
+
+
+
+#This script is written using Google Cloud Dataproc
+
+
+
+
+import pyspark
+
+
+
+
+sc = pyspark.SparkContext()
+
+
+
+
+AllstarHeader = ["playerID","yearID","gameNum","gameID","teamID","lgID","GP","startingPos"]
+
+
+
+
+catchers = (
+
+    sc.textFile("gs://bahntgebigdata/AllstarFull.csv")
+
+    .map(lambda s:s.encode("utf-8").split(","))
+
+    .map(lambda a:dict(zip(AllstarHeader,a)))
+
+    .filter(lambda d:d["startingPos"]=="2")
+
+    .filter(lambda d:d["lgID"]=="NL")
+
+    .map(lambda d:d["playerID"]+","+d["yearID"]+","+d["teamID"])
+
+    .coalesce(1)
+
+    .saveAsTextFile("gs://bahntgebigdata/output")
+
+)
+
+
+
+
+print(catchers)
+
+
+
+
+#---------------------------------------------------------------
+
+2.)
+
+
+
+
+#The PySpark script below produces a list of all of Babe Ruth's homeruns (HR)
+
+
+
+
+#This script is written using Google Cloud Dataproc which allows you to provision Apache Hadoop clusters
+
+#and connect to underlying analytic data stores.
+
+
+
+
+import pyspark
+
+
+
+
+sc = pyspark.SparkContext()
+
+
+
+
+header = ["playerID","yearID","stint","teamID","lgID","G","AB","R","H","2B","3B","HR","RBI","SB","CS","BB","SO","IBB","HBP","SH","SF","GIDP"]
+
+
+
+
+result = (
+
+    sc.textFile("gs://bahntgebigdata/Batting.csv")
+
+    .map(lambda s: s.encode("utf-8").split(","))
+
+    .map(lambda a: dict(zip(header, a)))
+
+    .filter(lambda d: d["playerID"] == "ruthba01")
+
+    .map(lambda d: [d["playerID"], int(d["HR"])])
+
+    .groupByKey()
+
+    .map(lambda t:(t[0], reduce(lambda x,y:x+y,t[1])))
+
+    .collect()
+
+)
+
+
+
+
+print(result)
+
+
+
+
+#---------------------------------------------------------------
+
+3.)
+
+
+
+
+#The PySpark script below produces a list of all the players (first name, last name) who have hit more than
+
+#500 career Homeruns (careerHR).
+
+
+
+
+import pyspark
+
+from pyspark.sql import functions as F
+
+
+
+
+spark = (
+
+   pyspark.sql.SparkSession
+
+   .builder
+
+   .getOrCreate()
+
+)
+
+
+
+
+sc = spark.sparkContext
+
+
+
+
+df = (
+
+    spark.read.format("csv")
+
+    .option("header","true")
+
+    .option("inferSchema","true")
+
+    .load("gs://bahntgebigdata/BattingWh.csv")
+
+    .groupBy("playerID")
+
+    .agg(F.sum("HR").alias("careerHR"))
+
+)
+
+
+
+
+hitters = (
+
+    df.filter(df.careerHR >= 500)
+
+    .sort("careerHR", ascending=False)
+
+)
+
+
+
+
+names = (
+
+    spark.read.format("csv")
+
+    .option("header","true")
+
+    .option("inferSchema","true")
+
+    .load("gs://bahntgebigdata/PeopleWh.csv")
+
+    .select("playerID","nameFirst","nameLast")
+
+)
+
+
+
+
+result = (
+
+    names.join(hitters,names.playerID == hitters.playerID)
+
+    .drop(names.playerID)
+
+    .drop(hitters.playerID)
+
+)
+
+
+
+
+finalResult = (
+
+    result.rdd.map(list)
+
+    .map(lambda a:a[0]+","+a[1]+","+str(a[2]))
+
+    .map(lambda s:s.encode("utf-8"))
+
+    .coalesce(1)
+
+    .saveAsTextFile("gs://bahntgebigdata/output")
+
+)
+
+
+
+
+#---------------------------------------------------------------
+
+4.)
+
+
+
+
+#The PySpark script below produces a list that includes playerID of each player, yearID, Homeruns (HR), and name of team they played for (teamID).
+
+
+
+
+#This program pulls data from three different csv files.
+
+
+
+
+import pyspark
+
+from pyspark.sql import functions as F
+
+
+
+
+spark = (
+
+   pyspark.sql.SparkSession
+
+   .builder
+
+   .getOrCreate()
+
+)
+
+
+
+
+sc = spark.sparkContext
+
+
+
+
+hitters = (
+
+    spark.read.format("csv")
+
+    .option("header","true")
+
+    .option("inferSchema","true")
+
+    .load("gs://bahntgebigdata/BattingWh.csv")
+
+    .select("playerID","yearID","teamID","HR")
+
+)
+
+
+
+
+hitters = (
+
+    hitters.filter(hitters.HR >= 50)
+
+)
+
+
+
+
+playerNames = (
+
+    spark.read.format("csv")
+
+    .option("header","true")
+
+    .option("inferSchema","true")
+
+    .load("gs://bahntgebigdata/PeopleWh.csv")
+
+    .select("playerID","nameFirst","nameLast")
+
+)
+
+
+
+
+result = (
+
+    playerNames.join(hitters,playerNames.playerID == hitters.playerID)
+
+    .drop("playerID")
+
+)
+
+
+
+
+teamNames = (
+
+    spark.read.format("csv")
+
+    .option("header","true")
+
+    .option("inferSchema","true")
+
+    .load("gs://bahntgebigdata/TeamsWh.csv")
+
+    .select("teamID","yearID","name")
+
+)
+
+
+
+
+(
+
+    result.join(teamNames,(result.teamID == teamNames.teamID) & (result.yearID == teamNames.yearID))
+
+    .drop("teamID")
+
+    .drop(result.yearID)
+
+    .sort("HR",ascending=False)
+
+    .show(100)
+
+)
+
+
+
+
+#---------------------------------------------------------------
+
+5.)
+
+
+
+
+'''
+
+The PySpark script below produces a data stream of Lenny Dykstra's 1990 batting averages, visualized on 3rd party platform.
+
+'''
+
+
+
+
+#Preprocess the data before putting it into the data stream. This will allow for simple strings to enter the stream.
+
+
+
+
+import pyspark
+
+
+
+
+sc = pyspark.SparkContext()
+
+
+
+
+def f(a):
+
+    month = a[29:31]
+
+    day = a[32:34]
+
+    year = a[35:39]
+
+    date = "{}-{}-{}".format(month,day,year)
+
+    date = date.replace(" ", "0")
+
+    avg = a[179:184]
+
+    avg = avg.replace(" ", "0")
+
+    return(date,avg)
+
+
+
+
+result = (
+
+    sc.textFile("gs://bahntgebigdata/dykstra")
+
+    .map(lambda s:s.encode("utf-8"))
+
+    #filter on "<A"
+
+    .filter(lambda s:s[:2]=="<A")
+
+    .map(f)
+
+    .sortBy(lambda t:t[0])
+
+    .map(lambda t:t[0]+","+str(t[1]))
+
+    .coalesce(1)
+
+    .saveAsTextFile("gs://bahntgebigdata/output")
+
+)
+
+
+
+
+print(result)
+
+
+
+
+#---------------------------------------------------------------
+
+
+
+
+'''
+
+    Streaming time-series data with 3rd party platform
+
+'''
+
+
+
+
+from __future__ import print_function
+
+import pyspark
+
+import pyspark.streaming
+
+from time import sleep
+
+import requests
+
+from datetime import datetime
+
+
+
+
+sc = pyspark.SparkContext()
+
+ssc = pyspark.streaming.StreamingContext(sc,1)
+
+
+
+
+days = (
+
+    sc.textFile("gs://bahntgebigdata/dykstra")
+
+    .map(lambda s:s.encode("utf-8"))
+
+    .filter(lambda s:s[:2]=="<A")
+
+    .map(lambda s:s.split(">"))
+
+    .map(lambda a:[a[1][:10].replace(" ", "0"),a[4].split()[22]])
+
+    .collect()
+
+)
+
+
+
+
+rddQueue = []
+
+
+
+
+for day in days:
+
+    rddQueue += [sc.parallelize([day])]
+
+
+
+
+url = "http://things.ubidots.com/api/v1.6/devices/practice"
+
+headers = {"X-Auth-Token": " ", "Content-Type": "application/json"}
+
+
+
+
+def sendData(a):
+
+    year = int(a[0][6:10])
+
+    month = int(a[0][0:2])
+
+    day = int(a[0][3:5])
+
+    dt = datetime(year,month,day)
+
+    ms = round((dt-datetime(1990,4,15)).total_seconds()*1000)
+
+    ms = "%.0f" % ms
+
+    requests.post(url=url,headers=headers,json={"batting_in_class":{"value":float(a[1]), "timestamp":ms}})
+
+
+
+
+inputStream = ssc.queueStream(rddQueue)
+
+
+
+
+output = (
+
+    inputStream
+
+)
+
+
+
+
+output.foreachRDD(lambda rdd: rdd.foreach(sendData))
+
+output.foreachRDD(lambda rdd:print(rdd.collect()))
+
+
+
+
+#---------------------------------------------------------------
+
+6.)
+
+
+
+
+'''
+
+    The PySpark script below produces a data stream of start speeds for every pitch, with the correct timestamp,
+
+    for a recent Philadelphia Phillies game, visulaized on 3rd party platform.
+
+'''
+
+
+
+
+#Preprocess the data before putting it into the data stream. This will allow for simple strings to enter the stream.
+
+
+
+
+import pyspark
+
+
+
+
+sc = pyspark.SparkContext()
+
+
+
+
+def f(a):
+
+    speed = a[23]
+
+    zulu = a[28]
+
+    return(speed, zulu)
+
+
+
+
+def p(a):
+
+    time = a[28:-2]
+
+    speed = a[13:17]
+
+    return(time, speed)
+
+
+
+
+result = (
+
+    sc.textFile("gs://bahntgebigdata/phillies")
+
+    .map(lambda s:s.encode("utf-8").strip())
+
+    .filter(lambda s:"start_speed" in s)
+
+    .map(lambda s:s.split('" '))
+
+    .map(f)
+
+    .sortBy(lambda t:t[0])
+
+    .map(lambda t:str(t[0])+","+str(t[1]))
+
+    .map(p)
+
+    .map(lambda t:t[0]+","+str(t[1]))
+
+    .coalesce(1)
+
+    .saveAsTextFile("gs://bahntgebigdata/output")
+
+)
+
+
+
+
+print(result)
+
+
+
+
+#---------------------------------------------------------------
+
+
+
+
+'''
+
+    Streaming time-series data with 3rd party platform.
+
+'''
+
+
+
+
+from __future__ import print_function
+
+import pyspark
+
+import pyspark.streaming
+
+from time import sleep
+
+import requests
+
+from datetime import datetime
+
+
+
+
+sc = pyspark.SparkContext()
+
+ssc = pyspark.streaming.StreamingContext(sc,1)
+
+
+
+
+speed = (
+
+    sc.textFile("gs://bahntgebigdata/midA.csv")
+
+    .map(lambda s:s.encode("utf-8"))
+
+    .collect()
+
+)
+
+
+
+
+rddQueue = []
+
+
+
+
+for line in speed:
+
+    rddQueue += [sc.parallelize([line])]
+
+
+
+
+url = "http://things.ubidots.com/api/v1.6/devices/Practice"
+
+headers = {"X-Auth-Token": " ", "Content-Type": "application/json"}
+
+
+
+
+def sendData(a):
+
+    #split date on '-', month,day,year
+
+    dt_array = a[0].split("-")
+
+    #when splitting, they will all be strings - wrap in 'int'
+
+    month = int(dt_array[1])
+
+    day = int(dt_array[2][:2])
+
+    year = int(dt_array[0])
+
+    #split time on ':', hour,minute,second
+
+    dt_array_2 = a[0].split(":")
+
+    hour = int(dt_array_2[0][11:])
+
+    minute = int(dt_array_2[1])
+
+    second = int(dt_array_2[2][:2])
+
+
+
+
+    dt = datetime(year,month,day,hour,minute,second)
+
+
+
+
+    #take each date coming out and change it to milliseconds
+
+    ms = round((dt-datetime(1970,1,1)).total_seconds()*1000)
+
+    ms = "%.0f" % ms
+
+    requests.post(url=url,headers=headers,json={"mid":{"value":a[1],"timestamp":ms}})
+
+
+
+
+inputStream = ssc.queueStream(rddQueue)
+
+
+
+
+output = (
+
+    inputStream
+
+    .map(lambda s:s.split(","))
+
+    .map(lambda a:[a[0],float(a[1])])
+
+    .map(lambda a:([a[0],float(a[1])]))
+
+)
+
+
+
+
+output.foreachRDD(lambda rdd: rdd.foreach(sendData))
+
+output.foreachRDD(lambda rdd: print(rdd.collect()))
+
+
+
+
+ssc.start()
+
+sleep(330)
+
+ssc.stop()
+
+
+
+
+#---------------------------------------------------------------
+
+7.)
+
+
+
+
+'''
+
+    This is an additional third example of preprocessing data (Mark McGwire and Sammy Sosa's career homeruns) for 3rd party platform.
+
+'''
+
+
+
+
+import pyspark
+
+
+
+
+sc = pyspark.SparkContext()
+
+
+
+
+def f(a):
+
+    year = a[0][3:7]
+
+    month = a[0][7:9]
+
+    day = a[0][9:11]
+
+    date = "{}-{}-{}".format(year,month,day)
+
+    if(a[7][0] == "H" and a[7][1] != "P"):
+
+        HR = 1
+
+    else:
+
+        HR = 0
+
+    player = a[4]
+
+    return((player+","+date,HR))
+
+
+
+
+homeruns=(
+
+    sc.textFile("gs://bahntgebigdata/bdat")
+
+    .map(lambda s:s.encode("utf-8"))
+
+    .filter(lambda s:s[13:17]=="play")
+
+    .map(lambda s:s.split(","))
+
+    .filter(lambda a:a[4]=="mcgwm001" or a[4]=="sosas001")
+
+    .map(f)
+
+    .groupByKey()
+
+    .mapValues(sum)
+
+    .sortBy(lambda t:t[0])
+
+    .map(lambda t:t[0]+","+str(t[1]))
+
+    .coalesce(1)
+
+    .saveAsTextFile("gs://bahntgebigdata/output")
+
+)
+
+
+
+
+print(homeruns)
+
+
+
+
+#---------------------------------------------------------------
+
+8.)
+
+
+
+
+'''
+
+    This is an additional third example of streaming data (Coca-Cola Consolidated Inc. (COKE) financial data from Yahoo! Finance) with 3rd party platform.
+
+    This script generates a data stream directly from the data downloaded from the website.
+
+'''
+
+
+
+
+#Step 1: Download Data from website
+
+#Step 2: Upload data to GCP
+
+#Step 3: Stream data
+
+
+
+
+
+
+
+from __future__ import print_function
+
+
+
+
+import pyspark
+
+import requests
+
+import pyspark.streaming
+
+from time import sleep
+
+
+
+
+sc = pyspark.SparkContext()
+
+ssc = pyspark.streaming.StreamingContext(sc,1)
+
+
+
+
+coke = (
+
+    sc.textFile("gs://bahntgebigdata/COKE.csv")
+
+    .map(lambda s:s.encode('utf-8'))
+
+    .collect()
+
+)
+
+
+
+
+rddQueue = []
+
+
+
+
+for day in coke:
+
+    #taking each day and making it its own rdd, and putting it in rddQueue
+
+    rddQueue += [sc.parallelize([day])]
+
+
+
+
+inputStream = ssc.queueStream(rddQueue)
+
+
+
+
+output = (
+
+    inputStream
+
+    .map(lambda s: s.split(","))
+
+    .map(lambda a: a[1])
+
+)
+
+
+
+
+#function for what you should do for each rdd coming in to stream
+
+output.foreachRDD(lambda rdd: print(rdd.collect()))
+
+
+
+
+ssc.start()
+
+sleep(10)
+
+ssc.stop()
